@@ -3,17 +3,19 @@ plugins {
     application
     eclipse
     `check-lib-versions`
-    id("org.graalvm.buildtools.native") version "0.10.1"
+    id("org.graalvm.buildtools.native") version "0.10.2"
 }
 
-version = "0.13.4-SNAPSHOT"
+version = "0.13.5-SNAPSHOT"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
 
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
+    if (!JavaVersion.current().isCompatibleWith(targetCompatibility)) {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(targetCompatibility.majorVersion))
+        }
     }
 }
 

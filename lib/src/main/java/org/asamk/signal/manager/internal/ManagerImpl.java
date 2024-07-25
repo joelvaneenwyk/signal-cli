@@ -92,6 +92,7 @@ import org.signal.libsignal.usernames.BaseUsernameException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.signalservice.api.SignalSessionLock;
+import org.whispersystems.signalservice.api.messages.SignalServiceAttachment;
 import org.whispersystems.signalservice.api.messages.SignalServiceDataMessage;
 import org.whispersystems.signalservice.api.messages.SignalServicePreview;
 import org.whispersystems.signalservice.api.messages.SignalServiceReceiptMessage;
@@ -101,6 +102,8 @@ import org.whispersystems.signalservice.api.push.ServiceId.ACI;
 import org.whispersystems.signalservice.api.push.ServiceId.PNI;
 import org.whispersystems.signalservice.api.push.ServiceIdType;
 import org.whispersystems.signalservice.api.push.exceptions.CdsiResourceExhaustedException;
+import org.whispersystems.signalservice.api.push.exceptions.UsernameMalformedException;
+import org.whispersystems.signalservice.api.push.exceptions.UsernameTakenException;
 import org.whispersystems.signalservice.api.util.DeviceNameUtil;
 import org.whispersystems.signalservice.api.util.InvalidNumberException;
 import org.whispersystems.signalservice.api.util.PhoneNumberFormatter;
@@ -396,6 +399,10 @@ public class ManagerImpl implements Manager {
             } else {
                 context.getAccountHelper().reserveUsernameFromNickname(username);
             }
+        } catch (UsernameMalformedException e) {
+            throw new InvalidUsernameException("Username is malformed", e);
+        } catch (UsernameTakenException e) {
+            throw new InvalidUsernameException("Username is already registered", e);
         } catch (BaseUsernameException e) {
             throw new InvalidUsernameException(e.getMessage() + " (" + e.getClass().getSimpleName() + ")", e);
         }
@@ -505,7 +512,7 @@ public class ManagerImpl implements Manager {
 
     @Override
     public List<Group> getGroups() {
-        return account.getGroupStore().getGroups().stream().map(this::toGroup).toList();
+        return context.getGroupHelper().getGroups().stream().map(this::toGroup).toList();
     }
 
     private Group toGroup(final GroupInfo groupInfo) {
@@ -732,17 +739,23 @@ public class ManagerImpl implements Manager {
     private void applyMessage(
             final SignalServiceDataMessage.Builder messageBuilder, final Message message
     ) throws AttachmentInvalidException, IOException, UnregisteredRecipientException, InvalidStickerException {
+        final var additionalAttachments = new ArrayList<SignalServiceAttachment>();
         if (message.messageText().length() > 2000) {
             final var messageBytes = message.messageText().getBytes(StandardCharsets.UTF_8);
             final var textAttachment = AttachmentUtils.createAttachmentStream(new StreamDetails(new ByteArrayInputStream(
                     messageBytes), MimeUtils.LONG_TEXT, messageBytes.length), Optional.empty());
             messageBuilder.withBody(message.messageText().substring(0, 2000));
-            messageBuilder.withAttachment(context.getAttachmentHelper().uploadAttachment(textAttachment));
+            additionalAttachments.add(context.getAttachmentHelper().uploadAttachment(textAttachment));
         } else {
             messageBuilder.withBody(message.messageText());
         }
         if (!message.attachments().isEmpty()) {
-            messageBuilder.withAttachments(context.getAttachmentHelper().uploadAttachments(message.attachments()));
+            if (!additionalAttachments.isEmpty()) {
+                additionalAttachments.addAll(context.getAttachmentHelper().uploadAttachments(message.attachments()));
+                messageBuilder.withAttachments(additionalAttachments);
+            } else {
+                messageBuilder.withAttachments(context.getAttachmentHelper().uploadAttachments(message.attachments()));
+            }
         }
         if (!message.mentions().isEmpty()) {
             messageBuilder.withMentions(resolveMentions(message.mentions()));
